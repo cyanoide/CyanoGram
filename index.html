@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>CyanoGram</title>
+<meta name="description" content="Retouche photo argentique : grain, poussières, bloom, teal & orange.">
+<meta name="theme-color" content="#0b0d10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CyanoGram">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><img src="icons/favicon.svg" alt="" width="22" height="22"><span>Cyano<b>Gram</b></span></div>
+    <div class="actions">
+      <button id="btnOpen" class="btn">Photo</button>
+      <button id="btnCompare" class="btn" disabled>Original</button>
+      <button id="btnExport" class="btn primary" disabled>Exporter</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <canvas id="view"></canvas>
+    <div class="empty" id="empty">
+      <div class="empty-card">
+        <p>Dépose une photo ici,<br>ou choisis-en une.</p>
+        <button id="btnOpen2" class="btn primary big">Choisir une photo</button>
+        <small>Tout reste sur ton appareil.</small>
+      </div>
+    </div>
+    <div class="hint" id="hint" hidden>Maintiens pour voir l'original</div>
+  </main>
+
+  <section class="panel">
+    <nav class="tabs" id="tabs"></nav>
+    <div class="body" id="body"></div>
+  </section>
+</div>
+<input type="file" id="file" accept="image/*" hidden>
+<input type="file" id="fileStyles" accept="application/json,.json" hidden>
+<dialog id="exportDlg">
+  <h2>Photo prête</h2>
+  <p id="expInfo"></p>
+  <p id="expMeta" class="note"></p>
+  <div class="dlg-actions">
+    <button class="btn primary big" id="expShare">Enregistrer / Partager</button>
+    <button class="btn" id="expDl">Télécharger le fichier</button>
+    <button class="btn" id="expClose">Fermer</button>
+  </div>
+</dialog>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

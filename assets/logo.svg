@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
+  <g id="losanges">
+    <path d="M 256.00,284.04 L 314.20,385.54 L 256.00,486.74 L 197.80,385.54 Z" fill="black"/>
+    <path d="M 206.16,247.83 L 127.62,334.55 L 13.39,310.47 L 91.65,223.85 Z" fill="black"/>
+    <path d="M 225.20,189.25 L 118.46,141.34 L 106.06,25.26 L 212.62,72.92 Z" fill="black"/>
+    <path d="M 286.80,189.25 L 299.38,72.92 L 405.94,25.26 L 393.54,141.34 Z" fill="black"/>
+    <path d="M 305.84,247.83 L 420.35,223.85 L 498.61,310.47 L 384.38,334.55 Z" fill="black"/>
+  </g>
+  <path id="etoile" d="M 256.00,135.54 L 278.28,200.98 L 347.40,201.94 L 292.05,243.35 L 312.49,309.39 L 256.00,269.54 L 199.51,309.39 L 219.95,243.35 L 164.60,201.94 L 233.72,200.98 Z" fill="black"/>
+</svg>
