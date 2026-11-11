@@ -25,7 +25,8 @@ export function createCloud({ getStyles, setStyles, getDeleted, setDeleted, onSt
   const client = lib ? lib.createClient(SB_URL, SB_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: AUTH_KEY },
   }) : null;
-  let user = null, timer = null, busy = false, again = false;
+  let user = null, profile = null, timer = null, busy = false, again = false;
+  const USERNAME_RE = /^[a-z0-9_.-]{3,24}$/;
 
   const stored = () => { try { const s = JSON.parse(localStorage.getItem(AUTH_KEY)); return s && s.user ? s : null; } catch { return null; } };
 
@@ -97,21 +98,54 @@ export function createCloud({ getStyles, setStyles, getDeleted, setDeleted, onSt
       document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(); });
       return user;
     },
-    async signIn(email, password){
-      const { data, error } = await client.auth.signInWithPassword({ email, password });
+    // identifiant = e-mail OU nom d'utilisateur (ce dernier passe par la fonction serveur `login`)
+    async signIn(identifier, password){
+      if (identifier.includes('@')){
+        const { data, error } = await client.auth.signInWithPassword({ email: identifier, password });
+        if (error) throw error;
+        user = data.user; return { signedIn: true };
+      }
+      const r = await fetch(`${SB_URL}/functions/v1/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        body: JSON.stringify({ identifier, password }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Connexion impossible');
+      const { data, error } = await client.auth.setSession({ access_token: j.access_token, refresh_token: j.refresh_token });
       if (error) throw error;
       user = data.user; return { signedIn: true };
     },
-    async signUp(email, password){
-      const { data, error } = await client.auth.signUp({ email, password });
+    async signUp(email, password, username){
+      const meta = username ? { display_name: username, username } : undefined;
+      const { data, error } = await client.auth.signUp({ email, password, options: meta ? { data: meta } : undefined });
       if (error) throw error;
-      if (data.session){ user = data.user; return { signedIn: true }; }
+      if (data.session){
+        user = data.user;
+        if (username) { try { await this.saveProfile(username); } catch {} }
+        return { signedIn: true };
+      }
       return { signedIn: false };                  // confirmation par e-mail requise
+    },
+    get displayName(){ return profile?.display_name || user?.user_metadata?.display_name || null; },
+    async loadProfile(){
+      if (!client || !user) return null;
+      const { data, error } = await client.from('user_profiles').select('username,display_name').maybeSingle();
+      if (error) throw error;
+      profile = data || null; return profile;
+    },
+    async saveProfile(raw){
+      const username = String(raw || '').trim().toLowerCase();
+      if (!USERNAME_RE.test(username)) throw new Error('Nom d\u2019utilisateur : 3 à 24 caractères (lettres, chiffres, . _ -).');
+      const { error } = await client.from('user_profiles').upsert({ user_id: user.id, username, display_name: username });
+      if (error){ throw new Error(error.code === '23505' ? 'Ce nom d\u2019utilisateur est déjà pris.' : error.message); }
+      await client.auth.updateUser({ data: { display_name: username, username } }).catch(() => {});
+      profile = { username, display_name: username };
     },
     async signOut(){
       await sync();                                // on pousse tout avant de partir
       await client.auth.signOut();
-      user = null;
+      user = null; profile = null;
     },
     schedule, sync,
   };

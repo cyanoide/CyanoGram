@@ -50,8 +50,9 @@
     <img src="icons/icon-192.png" alt="" width="72" height="72">
     <h1>Cyano<b>Gram</b></h1>
     <p>Connecte-toi pour retrouver tes styles sur tous tes appareils.</p>
-    <input id="gateEmail" type="email" name="email" placeholder="E-mail" autocomplete="username" inputmode="email" autocapitalize="none" required>
+    <input id="gateEmail" type="text" name="username" placeholder="E-mail ou nom d'utilisateur" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required>
     <input id="gatePw" type="password" name="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password" required>
+    <input id="gateUser" type="text" placeholder="Nom d'utilisateur (pour créer un compte)" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="24">
     <p class="gate-msg" id="gateMsg"></p>
     <button class="btn primary big" type="submit">Se connecter</button>
     <button class="btn" type="button" id="gateSignup">Créer un compte</button>

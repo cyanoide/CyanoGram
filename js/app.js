@@ -470,8 +470,10 @@ function renderAccount(){
   if (!cloud?.available){ el.textContent = ''; return; }
   const u = cloud.user;
   if (u){
-    el.innerHTML = `<span class="who"></span><span class="sync"></span><button class="btn small" id="btnLogout">Se déconnecter</button>`;
-    el.querySelector('.who').textContent = u.email || 'Connecté';
+    el.innerHTML = `<span class="who"><b></b><small></small></span><span class="sync"></span><button class="btn small" id="btnLogout">Se déconnecter</button>`;
+    const dn = cloud.displayName;
+    el.querySelector('.who b').textContent = dn || u.email || 'Connecté';
+    el.querySelector('.who small').textContent = dn ? (u.email || '') : '';
     el.querySelector('.sync').textContent = syncMsg;
     $('#btnLogout').onclick = async () => {
       if (!confirm('Se déconnecter ? Tes styles restent dans ton compte et reviendront à la prochaine connexion.')) return;
@@ -484,6 +486,19 @@ function renderAccount(){
     $('#btnLogin').onclick = showGate;
   }
 }
+async function ensureProfile(){
+  if (!cloud?.user) return;
+  let p;
+  try { p = await cloud.loadProfile(); } catch { return; }
+  if (p){ renderAccount(); return; }
+  let def = (cloud.user.email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 24);
+  for (;;){
+    const n = prompt('Choisis ton nom d\u2019utilisateur (3-24 caractères : lettres, chiffres, . _ -). Il sert aussi à te connecter :', def);
+    if (!n) break;
+    try { await cloud.saveProfile(n); toast('Bienvenue ' + n); break; } catch (e){ toast(frError(e)); def = n; }
+  }
+  renderAccount();
+}
 function showGate(){
   const g = $('#gate'); if (!g || !cloud?.available) return;
   $('#gateMsg').textContent = ''; g.hidden = false;
@@ -493,23 +508,27 @@ function initGate(){
   const g = $('#gate'); if (!g) return;
   const msg = (t, ok) => { const m = $('#gateMsg'); m.textContent = t; m.className = 'gate-msg' + (ok ? ' ok' : ''); };
   const creds = () => {
-    const email = $('#gateEmail').value.trim(), pw = $('#gatePw').value;
-    if (!email || !pw){ msg('Renseigne ton e-mail et ton mot de passe.'); return null; }
-    return [email, pw];
+    const id = $('#gateEmail').value.trim(), pw = $('#gatePw').value;
+    if (!id || !pw){ msg('Renseigne ton identifiant et ton mot de passe.'); return null; }
+    return [id, pw];
   };
-  const done = () => { g.hidden = true; $('#gatePw').value = ''; localStorage.removeItem('cyanogram.skip'); renderAccount(); cloud.sync(); };
+  const done = async () => { g.hidden = true; $('#gatePw').value = ''; localStorage.removeItem('cyanogram.skip'); renderAccount(); await ensureProfile(); cloud.sync(); };
   const run = async fn => {
     const c = creds(); if (!c) return;
     const btns = g.querySelectorAll('button'); btns.forEach(b => b.disabled = true);
     try {
       const r = await fn(...c);
-      if (r.signedIn) done();
+      if (r.signedIn) await done();
       else msg('Compte créé. Clique sur le lien reçu par e-mail pour le confirmer, puis connecte-toi.', true);
     } catch (e){ msg(frError(e)); }
     finally { btns.forEach(b => b.disabled = false); }
   };
   $('#gateForm').onsubmit = e => { e.preventDefault(); run((a, b) => cloud.signIn(a, b)); };
-  $('#gateSignup').onclick = () => run((a, b) => cloud.signUp(a, b));
+  $('#gateSignup').onclick = () => run((a, b) => {
+    if (!a.includes('@')) throw new Error('Pour créer un compte, saisis une adresse e-mail.');
+    const u = $('#gateUser').value.trim().toLowerCase();
+    return cloud.signUp(a, b, u || undefined);
+  });
   $('#gateSkip').onclick = () => { try { localStorage.setItem('cyanogram.skip', '1'); } catch {} g.hidden = true; };
 }
 
@@ -691,7 +710,7 @@ function init(){
   initGate();
   cloud.init().then(user => {
     renderAccount();
-    if (user) cloud.sync();
+    if (user){ cloud.sync(); ensureProfile(); }
     else if (cloud.available && !localStorage.getItem('cyanogram.skip')) showGate();
   });
 
