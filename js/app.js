@@ -1,6 +1,7 @@
 import { Renderer } from './gl.js';
 import { SCHEMA, GROUPS, PRESETS, PARTICLE_STYLES } from './presets.js';
 import { readExif, injectMetadata, hasGps } from './exif.js';
+import { createCloud, frError } from './cloud.js';
 
 const $ = s => document.querySelector(s);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -11,12 +12,14 @@ let R, T; // renderer principal + renderer de vignettes
 const state = {
   presetId: 'original', intensity: 1, delta: {}, seed: Math.random() * 100,
   w: 0, h: 0, srcW: 0, srcH: 0, bypass: false, loaded: false, name: 'photo', meta: null, exportUrl: null,
+  kind: 'photo', video: null, exporting: false, cancelExport: false,
 };
 
 // ---------- filtres perso (localStorage) ----------
 // Double sauvegarde : stockage local + un cookie compact (1 an). Le cookie est renvoyé au serveur à chaque
 // requête : on le garde donc petit (valeurs non-défaut seulement, < 3,5 Ko) ; au-delà, seul le stockage
 // local et le fichier de sauvegarde font foi.
+let cloud = null, quiet = false;                 // quiet = écriture venant de la synchro (pas de re-sync)
 const CK = 'cg_styles', CK_MAX = 3500;
 const clean = s => String(s).replace(/[|;,=]/g, ' ');
 function toCookie(list){
@@ -59,10 +62,16 @@ const store = {
   },
   set(v){
     try { localStorage.setItem('cyanogram.custom', JSON.stringify(v)); } catch {}
-    if (!cookies.set(v)) toast('Trop de styles pour le cookie : pense à « Sauvegarder mes styles » (fichier)');
+    if (!cookies.set(v) && !quiet) toast('Trop de styles pour le cookie : pense à « Sauvegarder mes styles » (fichier)');
+    if (!quiet) cloud?.schedule();
   },
 };
 let custom = store.get();
+const deletedStore = {
+  get(){ try { return JSON.parse(localStorage.getItem('cyanogram.deleted') || '[]'); } catch { return []; } },
+  set(v){ try { localStorage.setItem('cyanogram.deleted', JSON.stringify(v)); } catch {} },
+};
+const markDeleted = id => { const d = deletedStore.get(); if (!d.includes(id)) d.push(id); deletedStore.set(d); };
 const allPresets = () => [...PRESETS, ...custom];
 const currentPreset = () => allPresets().find(p => p.id === state.presetId) || PRESETS[0];
 
@@ -82,13 +91,21 @@ function params(){
 }
 
 // ---------- rendu ----------
+function seedsNow(){
+  const v = state.video;
+  if (state.kind === 'video' && v){
+    const t = v.currentTime || 0;
+    return { seed: state.seed + Math.floor(t * 8) * 3.17, seedG: state.seed + Math.floor(t * 24) * 1.91 };
+  }
+  return { seed: state.seed, seedG: state.seed };
+}
 let queued = false;
 function draw(){
   if (queued || !state.loaded) return;
   queued = true;
   requestAnimationFrame(() => {
     queued = false;
-    R.render(params(), { bypass: state.bypass, seed: state.seed });
+    R.render(params(), { bypass: state.bypass, ...seedsNow() });
   });
 }
 
@@ -103,7 +120,9 @@ function maxDim(){
 }
 
 async function loadFile(file){
+  if (file && file.type.startsWith('video/')) return loadVideo(file);
   if (!file || !file.type.startsWith('image/')) return;
+  stopVideo();
   state.name = file.name.replace(/\.[^.]+$/, '');
   state.meta = null;
   try {
@@ -140,7 +159,7 @@ async function loadURL(url){
   t.getContext('2d').drawImage(c, (w - m) / 2, (h - m) / 2, m, m, 0, 0, 192, 192);
   T.setImage(t, 192, 192);
 
-  state.srcW = nw; state.srcH = nh; state.w = w; state.h = h; state.loaded = true;
+  state.srcW = nw; state.srcH = nh; state.w = w; state.h = h; state.loaded = true; state.kind = 'photo';
   if (w !== nw || h !== nh) toast(`Limite de l'appareil : export en ${w}×${h} (original ${nw}×${nh})`);
   const ps = Math.min(1, 1800 / Math.max(w, h));
   R.resize(Math.round(w * ps), Math.round(h * ps));
@@ -149,6 +168,81 @@ async function loadURL(url){
   $('#btnCompare').disabled = $('#btnExport').disabled = false;
   buildThumbs();
   draw();
+}
+
+// ---------- vidéo ----------
+const VIDEO_MAX = 1920;                      // plus grand côté en sortie
+function fmtTime(t){ t = Math.max(0, Math.round(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
+
+function stopVideo(){
+  const v = state.video;
+  if (v){ v.pause(); try { URL.revokeObjectURL(v.src); } catch {} }
+  state.video = null; state.kind = 'photo';
+  $('#vbar').hidden = true; $('#stage').classList.remove('video');
+  const b = $('#btnExport'); if (b) b.textContent = 'Exporter';
+}
+
+async function loadVideo(file){
+  stopVideo();
+  state.name = file.name.replace(/\.[^.]+$/, ''); state.meta = null;
+  const v = document.createElement('video');
+  v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+  v.src = URL.createObjectURL(file);
+  try {
+    await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('video')); });
+  } catch { toast('Vidéo illisible (format non pris en charge)'); URL.revokeObjectURL(v.src); return; }
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const sc = Math.min(1, VIDEO_MAX / Math.max(vw, vh));
+  const w = Math.max(2, Math.round(vw * sc / 2) * 2), h = Math.max(2, Math.round(vh * sc / 2) * 2);   // dimensions paires (H.264)
+  R.setImage(v, vw, vh);
+  // vignettes : première image, recadrée en carré
+  const t = document.createElement('canvas'); t.width = t.height = 192;
+  const m = Math.min(vw, vh);
+  t.getContext('2d').drawImage(v, (vw - m) / 2, (vh - m) / 2, m, m, 0, 0, 192, 192);
+  T.setImage(t, 192, 192);
+
+  state.video = v; state.kind = 'video';
+  state.srcW = vw; state.srcH = vh; state.w = w; state.h = h; state.loaded = true;
+  const ps = Math.min(1, 1280 / Math.max(w, h));
+  R.resize(Math.round(w * ps), Math.round(h * ps));
+  $('#empty').hidden = true; $('#hint').hidden = false;
+  $('#vbar').hidden = false; $('#stage').classList.add('video');
+  $('#btnCompare').disabled = $('#btnExport').disabled = false;
+  $('#btnExport').textContent = 'Exporter vidéo';
+  buildThumbs();
+  startPreviewLoop();
+  v.play().catch(() => {});
+  syncVideoBar();
+}
+
+function startPreviewLoop(){
+  const v = state.video;
+  const tick = () => {
+    if (state.video !== v || state.exporting) return;
+    R.updateFrame(v);
+    R.render(params(), { bypass: state.bypass, ...seedsNow() });
+    syncVideoBar();
+    if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(tick); else requestAnimationFrame(tick);
+  };
+  tick();
+}
+function syncVideoBar(){
+  const v = state.video; if (!v) return;
+  $('#vPlay').textContent = v.paused ? '▶' : '⏸';
+  if (!$('#vSeek').matches(':active') && v.duration) $('#vSeek').value = Math.round(v.currentTime / v.duration * 1000);
+  $('#vTime').textContent = fmtTime(v.currentTime);
+}
+function initVideoBar(){
+  $('#vPlay').onclick = () => { const v = state.video; if (!v) return; if (v.paused) v.play(); else v.pause(); syncVideoBar(); };
+  $('#vSeek').oninput = e => {
+    const v = state.video; if (!v || !v.duration) return;
+    v.currentTime = e.target.value / 1000 * v.duration;
+    if (v.paused) v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => { R.updateFrame(v); draw(); syncVideoBar(); }) : setTimeout(() => { R.updateFrame(v); draw(); }, 80);
+  };
+  document.addEventListener('visibilitychange', () => {
+    // iOS suspend la page en arrière-plan : on remet la lecture proprement au retour
+    if (!document.hidden && state.video && !state.exporting) startPreviewLoop();
+  });
 }
 
 function thumbFor(preset){
@@ -198,7 +292,9 @@ function buildUI(){
   row2.innerHTML = `<button class="btn small" id="btnExpStyles">Sauvegarder mes styles</button>
     <button class="btn small" id="btnImpStyles">Importer</button>`;
   fp.append(row2);
+  const acct = document.createElement('div'); acct.className = 'acct'; acct.id = 'acct'; fp.append(acct);
   renderStrip();
+  renderAccount();
 
   // --- onglets de réglages
   for (const s of SCHEMA){
@@ -285,7 +381,7 @@ function renderStrip(){
     if (p.custom){
       const d = document.createElement('button'); d.className = 'del'; d.textContent = '×'; d.title = 'Supprimer';
       d.onclick = e => { e.stopPropagation(); if (confirm(`Supprimer « ${p.name} » ?`)){
-        custom = custom.filter(c => c.id !== p.id); store.set(custom);
+        custom = custom.filter(c => c.id !== p.id); markDeleted(p.id); store.set(custom);
         if (state.presetId === p.id) state.presetId = 'original';
         renderStrip(); syncSliders(); draw(); } };
       b.append(d);
@@ -308,7 +404,7 @@ function snapshot(){ return { ...params() }; }
 function saveCustom(){
   const name = prompt('Nom de ton style :', 'Mon style ' + (custom.length + 1));
   if (!name) return;
-  const p = { id: 'c' + Date.now(), name: name.trim().slice(0, 40), custom: true, params: snapshot(), seed: state.seed };
+  const p = { id: 'c' + Date.now(), name: name.trim().slice(0, 40), custom: true, params: snapshot(), seed: state.seed, updated: Date.now() };
   custom.push(p); store.set(custom);
   state.presetId = p.id; state.delta = {}; state.intensity = 1;
   renderStrip(); syncSliders(); toast('Style enregistré');
@@ -316,7 +412,7 @@ function saveCustom(){
 function updateCustom(){
   const p = custom.find(c => c.id === state.presetId);
   if (!p) return;
-  p.params = snapshot(); p.seed = state.seed; store.set(custom);
+  p.params = snapshot(); p.seed = state.seed; p.updated = Date.now(); store.set(custom);
   state.delta = {}; state.intensity = 1;
   renderStrip(); syncSliders(); toast(`« ${p.name} » mis à jour`);
 }
@@ -325,7 +421,7 @@ function renameCustom(){
   if (!p) return;
   const name = prompt('Nouveau nom :', p.name);
   if (!name) return;
-  p.name = name.trim().slice(0, 40); store.set(custom); renderStrip();
+  p.name = name.trim().slice(0, 40); p.updated = Date.now(); store.set(custom); renderStrip();
 }
 
 function exportStyles(list = custom, filename = 'cyanogram-styles.json'){
@@ -348,10 +444,73 @@ async function importStyles(file){
     for (const s of list){
       const keep = {};
       for (const sc of SCHEMA) if (typeof s.params[sc.key] === 'number') keep[sc.key] = clamp(s.params[sc.key], sc.min, sc.max);
-      custom.push({ id: 'c' + Date.now() + Math.floor(Math.random() * 1000), name: String(s.name).slice(0, 40), custom: true, params: keep, seed: s.seed });
+      custom.push({ id: 'c' + Date.now() + Math.floor(Math.random() * 1000), name: String(s.name).slice(0, 40), custom: true, params: keep, seed: s.seed, updated: Date.now() });
     }
     store.set(custom); renderStrip(); toast(`${list.length} style(s) importé(s)`);
   } catch { toast('Fichier de styles invalide'); }
+}
+
+// ---------- compte / synchronisation ----------
+let syncMsg = '';
+function onSyncStatus(st, info){
+  if (st === 'syncing') syncMsg = 'Synchronisation…';
+  else if (st === 'ok') syncMsg = 'Synchronisé ✓';
+  else if (st === 'error') syncMsg = 'Synchro en attente : ' + info;
+  else if (st === 'auth'){ renderAccount(); if (!cloud.user) showGate(); return; }
+  renderAccount();
+}
+function setStylesFromCloud(list){
+  quiet = true;
+  try { custom = list; store.set(custom); } finally { quiet = false; }
+  if (!allPresets().some(p => p.id === state.presetId)) state.presetId = 'original';
+  renderStrip(); syncSliders();
+}
+function renderAccount(){
+  const el = $('#acct'); if (!el) return;
+  if (!cloud?.available){ el.textContent = ''; return; }
+  const u = cloud.user;
+  if (u){
+    el.innerHTML = `<span class="who"></span><span class="sync"></span><button class="btn small" id="btnLogout">Se déconnecter</button>`;
+    el.querySelector('.who').textContent = u.email || 'Connecté';
+    el.querySelector('.sync').textContent = syncMsg;
+    $('#btnLogout').onclick = async () => {
+      if (!confirm('Se déconnecter ? Tes styles restent dans ton compte et reviendront à la prochaine connexion.')) return;
+      try { await cloud.signOut(); } catch (e){ toast(frError(e)); return; }
+      setStylesFromCloud([]); deletedStore.set([]); syncMsg = '';
+      renderAccount(); showGate();
+    };
+  } else {
+    el.innerHTML = `<span class="who">Non connecté : tes styles ne sont pas sauvegardés dans un compte.</span><button class="btn small primary" id="btnLogin">Se connecter</button>`;
+    $('#btnLogin').onclick = showGate;
+  }
+}
+function showGate(){
+  const g = $('#gate'); if (!g || !cloud?.available) return;
+  $('#gateMsg').textContent = ''; g.hidden = false;
+  setTimeout(() => $('#gateEmail').focus(), 50);
+}
+function initGate(){
+  const g = $('#gate'); if (!g) return;
+  const msg = (t, ok) => { const m = $('#gateMsg'); m.textContent = t; m.className = 'gate-msg' + (ok ? ' ok' : ''); };
+  const creds = () => {
+    const email = $('#gateEmail').value.trim(), pw = $('#gatePw').value;
+    if (!email || !pw){ msg('Renseigne ton e-mail et ton mot de passe.'); return null; }
+    return [email, pw];
+  };
+  const done = () => { g.hidden = true; $('#gatePw').value = ''; localStorage.removeItem('cyanogram.skip'); renderAccount(); cloud.sync(); };
+  const run = async fn => {
+    const c = creds(); if (!c) return;
+    const btns = g.querySelectorAll('button'); btns.forEach(b => b.disabled = true);
+    try {
+      const r = await fn(...c);
+      if (r.signedIn) done();
+      else msg('Compte créé. Clique sur le lien reçu par e-mail pour le confirmer, puis connecte-toi.', true);
+    } catch (e){ msg(frError(e)); }
+    finally { btns.forEach(b => b.disabled = false); }
+  };
+  $('#gateForm').onsubmit = e => { e.preventDefault(); run((a, b) => cloud.signIn(a, b)); };
+  $('#gateSignup').onclick = () => run((a, b) => cloud.signUp(a, b));
+  $('#gateSkip').onclick = () => { try { localStorage.setItem('cyanogram.skip', '1'); } catch {} g.hidden = true; };
 }
 
 function toast(msg){
@@ -375,6 +534,7 @@ function holdCompare(el){
 
 async function exportImage(){
   if (!state.loaded) return;
+  if (state.kind === 'video') return exportVideo();
   const btn = $('#btnExport'); btn.disabled = true; btn.textContent = 'Export…';
   try {
     const pw = view.width, ph = view.height;
@@ -404,15 +564,105 @@ async function exportImage(){
     };
     if (matchMedia('(pointer:coarse)').matches) showExportDialog(info);
     else { download(blob, name); toast(`Exporté · ${info.text}`); }
-  } finally { btn.disabled = false; btn.textContent = 'Exporter'; }
+  } finally { btn.disabled = false; btn.textContent = state.kind === 'video' ? 'Exporter vidéo' : 'Exporter'; }
+}
+
+function pickMime(){
+  if (!window.MediaRecorder) return null;
+  return ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+    .find(t => MediaRecorder.isTypeSupported(t)) || null;
+}
+const seekTo = (v, t) => new Promise(res => { if (Math.abs(v.currentTime - t) < 0.01) return res(); v.addEventListener('seeked', res, { once: true }); v.currentTime = t; });
+
+// Export vidéo : la vidéo est relue (en silence) à vitesse normale et le canvas filtré est enregistré.
+// Donc : la durée de l'export = la durée de la vidéo, et l'app doit rester au premier plan.
+async function exportVideo(){
+  const btn = $('#btnExport'), v = state.video;
+  if (state.exporting){ state.cancelExport = true; return; }
+  const mime = pickMime();
+  if (!mime || !view.captureStream){ toast('Export vidéo non pris en charge par ce navigateur'); return; }
+  state.exporting = true; state.cancelExport = false;
+  const pw = view.width, ph = view.height;
+  let wake = null, rec = null;
+  const label = btn.textContent;
+  btn.textContent = 'Annuler (0%)';
+  $('#btnCompare').disabled = true;
+  toast('Garde l’app ouverte et l’écran allumé pendant l’export');
+  try {
+    try { wake = await navigator.wakeLock?.request('screen'); } catch {}
+    v.pause(); v.loop = false; await seekTo(v, 0);
+    R.resize(state.w, state.h);
+
+    // son : la piste audio de la vidéo est routée vers l'enregistreur (et pas vers les haut-parleurs)
+    let audioTracks = [];
+    try {
+      state.actx ||= new (window.AudioContext || window.webkitAudioContext)();
+      await state.actx.resume();
+      state.asrc ||= state.actx.createMediaElementSource(v);
+      const dest = state.actx.createMediaStreamDestination();
+      state.asrc.disconnect(); state.asrc.connect(dest);
+      audioTracks = dest.stream.getAudioTracks();
+      v.muted = false;
+    } catch (e){ console.warn('Audio indisponible', e); }
+
+    const stream = view.captureStream(30);
+    const ms = new MediaStream([...stream.getVideoTracks(), ...audioTracks]);
+    const bits = Math.round(Math.min(16e6, Math.max(4e6, state.w * state.h * 30 * 0.12)));
+    rec = new MediaRecorder(ms, { mimeType: mime, videoBitsPerSecond: bits });
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    const stopped = new Promise(res => rec.onstop = res);
+    rec.start(500);
+
+    await new Promise(resolve => {
+      const finish = () => resolve();
+      v.addEventListener('ended', finish, { once: true });
+      const tick = () => {
+        if (!state.exporting || state.cancelExport || v.ended){ finish(); return; }
+        R.updateFrame(v);
+        R.render(params(), { ...seedsNow() });
+        btn.textContent = `Annuler (${Math.round(v.currentTime / v.duration * 100)}%)`;
+        if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(tick); else requestAnimationFrame(tick);
+      };
+      v.play().then(tick).catch(finish);
+    });
+    v.pause();
+    if (!state.cancelExport){ R.updateFrame(v); R.render(params(), { ...seedsNow() }); await new Promise(r => setTimeout(r, 300)); }
+    rec.stop(); await stopped;
+
+    if (state.cancelExport){ toast('Export annulé'); return; }
+    const type = mime.split(';')[0];
+    const blob = new Blob(chunks, { type });
+    if (!blob.size){ toast('Export vidéo vide : réessaie'); return; }
+    const ext = type.includes('mp4') ? 'mp4' : 'webm';
+    const name = `CyanoGram_${slug(state.name)}_${slug(currentPreset().name)}.${ext}`;
+    const info = {
+      blob, name, kind: 'video',
+      text: `${state.w} × ${state.h} px · ${fmtTime(v.duration)} · ${(blob.size / 1048576).toFixed(1)} Mo`,
+      meta: 'Son conservé. Le navigateur ne permet pas de recopier la localisation de la vidéo d’origine.' + (ext === 'webm' ? ' Format WebM : à convertir pour l’app Photos.' : ''),
+    };
+    if (matchMedia('(pointer:coarse)').matches) showExportDialog(info);
+    else { download(blob, name); toast(`Exporté · ${info.text}`); }
+  } catch (e){
+    console.warn(e); toast('Export vidéo impossible : ' + (e.message || e));
+    try { if (rec && rec.state !== 'inactive') rec.stop(); } catch {}
+  } finally {
+    state.exporting = false; state.cancelExport = false;
+    try { wake?.release(); } catch {}
+    R.resize(pw, ph);
+    v.muted = true; v.loop = true; await seekTo(v, 0);
+    btn.textContent = label; btn.disabled = false; $('#btnCompare').disabled = false;
+    startPreviewLoop(); v.play().catch(() => {});
+  }
 }
 
 function showExportDialog(info){
   const d = $('#exportDlg');
+  $('#expDlgTitle').textContent = info.kind === 'video' ? 'Vidéo prête' : 'Photo prête';
   $('#expInfo').textContent = info.text;
   $('#expMeta').textContent = info.meta;
   $('#expShare').onclick = async () => {
-    const file = new File([info.blob], info.name, { type: 'image/jpeg' });
+    const file = new File([info.blob], info.name, { type: info.blob.type || 'image/jpeg' });
     if (navigator.canShare?.({ files: [file] })){
       try { await navigator.share({ files: [file] }); d.close(); } catch (e){ if (e.name !== 'AbortError') download(info.blob, info.name); }
     } else { download(info.blob, info.name); }
@@ -432,7 +682,18 @@ function init(){
     document.body.innerHTML = '<p style="padding:24px">WebGL2 est requis (iOS 15+ / navigateur récent).</p>';
     return;
   }
+  cloud = createCloud({
+    getStyles: () => custom, setStyles: setStylesFromCloud,
+    getDeleted: () => deletedStore.get(), setDeleted: v => deletedStore.set(v),
+    onStatus: onSyncStatus,
+  });
   buildUI();
+  initGate();
+  cloud.init().then(user => {
+    renderAccount();
+    if (user) cloud.sync();
+    else if (cloud.available && !localStorage.getItem('cyanogram.skip')) showGate();
+  });
 
   const file = $('#file');
   const open = () => file.click();
@@ -440,6 +701,7 @@ function init(){
   file.onchange = () => { loadFile(file.files[0]); file.value = ''; };
   $('#fileStyles').onchange = e => { if (e.target.files[0]) importStyles(e.target.files[0]); e.target.value = ''; };
   $('#btnExport').onclick = exportImage;
+  initVideoBar();
   holdCompare($('#btnCompare')); holdCompare(view);
 
   const stage = $('#stage');

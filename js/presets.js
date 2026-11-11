@@ -145,4 +145,51 @@ export const PRESETS = [
     contrast: .1, fade: .2, temp: .15, sat: -.05,
     shHue: 200, shSat: .2, hiHue: 40, hiSat: .3,
     vignette: .3, grain: .5, dust: .25, hair: .1 } },
+
+  // ---- Famille pellicules (dans l'esprit du Kodak 400) ----
+  { id: 'kodak-gold', name: 'Kodak Gold 200', params: {
+    exposure: .05, contrast: .1, highlights: -.1, shadows: .15, fade: .12,
+    temp: .3, tint: .05, sat: .2, shHue: 40, shSat: .25, hiHue: 45, hiSat: .35,
+    bloom: .15, halation: .15, vignette: .3, grain: .5, grainSize: 1.2, dust: .2, hair: .05 } },
+
+  { id: 'portra-400', name: 'Portra 400', params: {
+    exposure: .1, contrast: -.05, highlights: -.15, shadows: .25, fade: .22,
+    temp: .12, tint: .08, sat: -.05, shHue: 175, shSat: .2, hiHue: 30, hiSat: .3,
+    bloom: .2, soft: .1, vignette: .2, grain: .35, dust: .1 } },
+
+  { id: 'ektar-100', name: 'Ektar 100', params: {
+    contrast: .3, highlights: -.1, shadows: .1, temp: .08, sat: .45,
+    shHue: 215, shSat: .2, hiHue: 40, hiSat: .2,
+    bloom: .1, vignette: .25, grain: .25, grainSize: .9, dust: .08 } },
+
+  { id: 'vision3-500t', name: 'Vision3 500T', params: {
+    exposure: -.05, contrast: .15, shadows: .2, fade: .15, temp: -.15,
+    shHue: 190, shSat: .6, hiHue: 25, hiSat: .45,
+    bloom: .35, halation: .5, vignette: .35, grain: .6, grainSize: 1.3, dust: .15, hair: .05 } },
+
+  { id: 'cinestill-800t', name: 'Cinestill 800T', params: {
+    contrast: .2, shadows: .2, fade: .1, temp: -.2, tint: -.1, sat: .15,
+    shHue: 195, shSat: .65, hiHue: 20, hiSat: .4,
+    bloom: .55, bloomRadius: .6, halation: 1, vignette: .3, grain: .65, grainSize: 1.4, dust: .15 } },
+
+  { id: 'tri-x', name: 'Tri-X 400 N&B', params: {
+    contrast: .35, highlights: -.1, shadows: .1, fade: .05, sat: -1,
+    bloom: .1, vignette: .4, grain: .85, grainSize: 1.3, dust: .3, hair: .15, scratch: .1 } },
+
+  { id: 'fuji-400h', name: 'Fuji 400H', params: {
+    exposure: .1, contrast: -.05, highlights: -.1, shadows: .2, fade: .15,
+    temp: -.12, tint: -.15, shHue: 160, shSat: .3, hiHue: 150, hiSat: .15,
+    bloom: .25, soft: .1, vignette: .2, grain: .4, dust: .1 } },
+
+  { id: 'polaroid', name: 'Polaroid', params: {
+    exposure: .1, contrast: -.1, fade: .35, temp: .2, tint: .1, sat: -.1,
+    shHue: 200, shSat: .3, hiHue: 45, hiSat: .3,
+    bloom: .3, soft: .25, vignette: .5, vigBlur: .3, aberr: .15,
+    grain: .45, dust: .2, hair: .1, stain: .15 } },
+
+  { id: 'jetable', name: 'Jetable 2000', params: {
+    exposure: .15, contrast: .3, shadows: -.1, temp: .1, tint: .1, sat: .3,
+    shHue: 280, shSat: .2, hiHue: 50, hiSat: .3,
+    bloom: .3, vignette: .6, aberr: .25, grain: .55, dust: .3, hair: .1,
+    leak: .15, leakHue: 20, leakPos: .9 } },
 ];

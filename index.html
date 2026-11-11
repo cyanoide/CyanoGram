@@ -21,7 +21,7 @@
   <header class="bar">
     <div class="brand"><img src="icons/favicon.svg" alt="" width="22" height="22"><span>Cyano<b>Gram</b></span></div>
     <div class="actions">
-      <button id="btnOpen" class="btn">Photo</button>
+      <button id="btnOpen" class="btn">Photo / vidéo</button>
       <button id="btnCompare" class="btn" disabled>Original</button>
       <button id="btnExport" class="btn primary" disabled>Exporter</button>
     </div>
@@ -31,11 +31,12 @@
     <canvas id="view"></canvas>
     <div class="empty" id="empty">
       <div class="empty-card">
-        <p>Dépose une photo ici,<br>ou choisis-en une.</p>
-        <button id="btnOpen2" class="btn primary big">Choisir une photo</button>
+        <p>Dépose une photo ou une vidéo ici,<br>ou choisis-en une.</p>
+        <button id="btnOpen2" class="btn primary big">Choisir une photo / vidéo</button>
         <small>Tout reste sur ton appareil.</small>
       </div>
     </div>
+    <div class="vbar" id="vbar" hidden><button class="vplay" id="vPlay" aria-label="Lecture / pause">⏸</button><input type="range" id="vSeek" min="0" max="1000" value="0"><span id="vTime">0:00</span></div>
     <div class="hint" id="hint" hidden>Maintiens pour voir l'original</div>
   </main>
 
@@ -44,10 +45,23 @@
     <div class="body" id="body"></div>
   </section>
 </div>
-<input type="file" id="file" accept="image/*" hidden>
+<div class="gate" id="gate" hidden>
+  <form class="gate-card" id="gateForm" autocomplete="on">
+    <img src="icons/icon-192.png" alt="" width="72" height="72">
+    <h1>Cyano<b>Gram</b></h1>
+    <p>Connecte-toi pour retrouver tes styles sur tous tes appareils.</p>
+    <input id="gateEmail" type="email" name="email" placeholder="E-mail" autocomplete="username" inputmode="email" autocapitalize="none" required>
+    <input id="gatePw" type="password" name="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password" required>
+    <p class="gate-msg" id="gateMsg"></p>
+    <button class="btn primary big" type="submit">Se connecter</button>
+    <button class="btn" type="button" id="gateSignup">Créer un compte</button>
+    <button class="linkbtn" type="button" id="gateSkip">Continuer sans compte</button>
+  </form>
+</div>
+<input type="file" id="file" accept="image/*,video/*" hidden>
 <input type="file" id="fileStyles" accept="application/json,.json" hidden>
 <dialog id="exportDlg">
-  <h2>Photo prête</h2>
+  <h2 id="expDlgTitle">Photo prête</h2>
   <p id="expInfo"></p>
   <p id="expMeta" class="note"></p>
   <div class="dlg-actions">
@@ -56,6 +70,7 @@
     <button class="btn" id="expClose">Fermer</button>
   </div>
 </dialog>
+<script src="js/vendor/supabase.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

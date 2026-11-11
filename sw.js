@@ -1,5 +1,5 @@
-const CACHE = 'cyanogram-v2';
-const ASSETS = ['./', 'index.html', 'style.css', 'js/app.js', 'js/gl.js', 'js/presets.js', 'js/exif.js',
+const CACHE = 'cyanogram-v3';
+const ASSETS = ['./', 'index.html', 'style.css', 'js/app.js', 'js/gl.js', 'js/presets.js', 'js/exif.js', 'js/cloud.js', 'js/vendor/supabase.js',
   'manifest.webmanifest', 'icons/favicon.svg', 'icons/favicon-32.png', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

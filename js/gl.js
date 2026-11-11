@@ -14,6 +14,7 @@ uniform sampler2D uTex;
 uniform vec2  uRes;
 uniform float uBypass;
 uniform float uSeed;
+uniform float uSeedG;
 
 uniform float uExposure, uContrast, uHighlights, uShadows, uFade;
 uniform float uTemp, uTint, uSat;
@@ -305,7 +306,7 @@ void main(){
     float cell = max(1.0, uGrainSize * px / 1600.0);
     vec2 gp = uv * uRes / cell;
     vec2 id = floor(gp);
-    float sd = uSeed * 13.7;
+    float sd = uSeedG * 13.7;
     float mono = mix(hash12(id + sd), vnoise(gp + sd), 0.35) - 0.5;
     vec3 g = vec3(hash12(id + sd + 17.3), hash12(id + sd + 41.7), hash12(id + sd + 63.1)) - 0.5;
     vec3 gr = mix(vec3(mono), g, 0.35);
@@ -361,6 +362,7 @@ export class Renderer {
     this.uRes = gl.getUniformLocation(prog, 'uRes');
     this.uBypass = gl.getUniformLocation(prog, 'uBypass');
     this.uSeed = gl.getUniformLocation(prog, 'uSeed');
+    this.uSeedG = gl.getUniformLocation(prog, 'uSeedG');
     this.tex = gl.createTexture();
     this.imgW = 1; this.imgH = 1;
   }
@@ -383,7 +385,15 @@ export class Renderer {
     this.gl.viewport(0, 0, w, h);
   }
 
-  render(params, { bypass = false, seed = 1 } = {}){
+  // vidéo : nouvelle image dans la texture existante
+  updateFrame(source){
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.generateMipmap(gl.TEXTURE_2D);
+  }
+
+  render(params, { bypass = false, seed = 1, seedG = seed } = {}){
     const gl = this.gl;
     gl.useProgram(this.prog);
     gl.activeTexture(gl.TEXTURE0);
@@ -392,6 +402,7 @@ export class Renderer {
     gl.uniform2f(this.uRes, this.imgW, this.imgH);
     gl.uniform1f(this.uBypass, bypass ? 1 : 0);
     gl.uniform1f(this.uSeed, seed);
+    gl.uniform1f(this.uSeedG, seedG);
     for (const k of UNIFORM_KEYS) gl.uniform1f(this.u[k], params[k] ?? 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
