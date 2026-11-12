@@ -95,7 +95,7 @@ function seedsNow(){
   const v = state.video;
   if (state.kind === 'video' && v){
     const t = v.currentTime || 0;
-    return { seed: state.seed + Math.floor(t * 8) * 3.17, seedG: state.seed + Math.floor(t * 24) * 1.91 };
+    return { seed: state.seed + Math.floor(t * 1.5) * 3.17, seedG: state.seed + Math.floor(t * 24) * 1.91 };
   }
   return { seed: state.seed, seedG: state.seed };
 }
