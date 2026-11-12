@@ -192,4 +192,86 @@ export const PRESETS = [
     shHue: 280, shSat: .2, hiHue: 50, hiSat: .3,
     bloom: .3, vignette: .6, aberr: .25, grain: .55, dust: .3, hair: .1,
     leak: .15, leakHue: 20, leakPos: .9 } },
+
+  // ---- Appareils argentiques & compacts ----
+  { id: 'kodachrome', name: 'Kodachrome 64', params: {
+    exposure: -.02, contrast: .25, highlights: -.1, fade: .06, temp: .18, sat: .3,
+    shHue: 215, shSat: .25, hiHue: 40, hiSat: .3, vignette: .3, grain: .3, grainSize: .9, dust: .15 } },
+
+  { id: 'agfa-vista', name: 'Agfa Vista 200', params: {
+    contrast: .15, fade: .1, temp: .1, tint: -.12, sat: .3,
+    shHue: 160, shSat: .3, hiHue: 20, hiSat: .35, vignette: .3, grain: .5, dust: .2, hair: .05 } },
+
+  { id: 'lomo-lca', name: 'Lomo LC-A', params: {
+    exposure: .02, contrast: .4, shadows: -.1, fade: .05, temp: -.05, tint: -.1, sat: .45,
+    shHue: 170, shSat: .45, hiHue: 55, hiSat: .3, bloom: .15, vignette: .85, vigBlur: .15, aberr: .2,
+    grain: .5, dust: .2, hair: .05 } },
+
+  { id: 'holga', name: 'Holga 120', params: {
+    contrast: .1, fade: .25, temp: .05, sat: -.1, shHue: 200, shSat: .25, hiHue: 40, hiSat: .2,
+    bloom: .3, soft: .55, vignette: .75, vigBlur: .7, aberr: .3, grain: .5, grainSize: 1.3,
+    leak: .3, leakHue: 25, leakPos: .15, dust: .3, hair: .15, stain: .1 } },
+
+  { id: 'instax', name: 'Instax Mini', params: {
+    exposure: .15, contrast: -.05, highlights: -.1, fade: .25, temp: -.08, tint: -.08, sat: .05,
+    shHue: 170, shSat: .3, hiHue: 60, hiSat: .25, bloom: .3, soft: .2, vignette: .35, vigBlur: .15,
+    grain: .3, dust: .1 } },
+
+  { id: 'hasselblad', name: 'Hasselblad 500C', params: {
+    exposure: .05, contrast: .05, highlights: -.2, shadows: .2, fade: .12, temp: .05, sat: -.1,
+    shHue: 190, shSat: .15, hiHue: 40, hiSat: .15, vignette: .15, grain: .2, grainSize: .8, dust: .08 } },
+
+  { id: 'redscale', name: 'Redscale', params: {
+    exposure: .05, contrast: .2, fade: .1, temp: .85, tint: .1, sat: .1,
+    shHue: 20, shSat: .5, hiHue: 40, hiSat: .5, bloom: .3, halation: .5, vignette: .5,
+    grain: .6, grainSize: 1.3, dust: .25, hair: .1 } },
+
+  { id: 'xpro', name: 'Cross-process', params: {
+    contrast: .35, fade: .05, temp: -.1, tint: .2, sat: .4,
+    shHue: 150, shSat: .55, hiHue: 55, hiSat: .5, vignette: .4, grain: .45, dust: .2 } },
+
+  { id: 'ilford-hp5', name: 'Ilford HP5 N&B', params: {
+    contrast: .3, highlights: -.1, shadows: .1, fade: .08, sat: -1, vignette: .35,
+    grain: .7, grainSize: 1.3, dust: .3, hair: .15, scratch: .1 } },
+
+  { id: 'leica-mono', name: 'Leica Monochrom', params: {
+    exposure: -.05, contrast: .5, shadows: -.15, sat: -1, shHue: 210, shSat: .1,
+    vignette: .3, grain: .3, grainSize: .8, dust: .05 } },
+
+  { id: 'flash-nuit', name: 'Flash de soirée', params: {
+    exposure: .1, contrast: .35, highlights: .1, shadows: -.25, temp: -.05, tint: .08, sat: .2,
+    shHue: 260, shSat: .35, hiHue: 50, hiSat: .2, bloom: .2, vignette: .75, aberr: .15,
+    grain: .55, dust: .3, hair: .05 } },
+
+  // ---- Vidéo & cinéma ----
+  { id: 'super8', name: 'Super 8', params: {
+    exposure: .05, contrast: .15, highlights: -.15, fade: .3, temp: .35, tint: .05, sat: .05,
+    shHue: 30, shSat: .35, hiHue: 45, hiSat: .45, bloom: .35, halation: .4, soft: .3,
+    vignette: .65, vigBlur: .25, aberr: .15, grain: .85, grainSize: 1.8,
+    leak: .25, leakHue: 15, leakPos: .85, dust: .55, hair: .35, scratch: .45, stain: .1 } },
+
+  { id: 'film16', name: '16 mm Ektachrome', params: {
+    contrast: .2, highlights: -.1, fade: .12, temp: -.12, tint: -.05, sat: .2,
+    shHue: 205, shSat: .45, hiHue: 40, hiSat: .3, bloom: .2, vignette: .4, grain: .7, grainSize: 1.5,
+    dust: .35, hair: .15, scratch: .2 } },
+
+  { id: 'vhs', name: 'Caméscope VHS', params: {
+    exposure: .05, contrast: .1, highlights: .1, fade: .2, temp: -.05, tint: .1, sat: .25,
+    shHue: 230, shSat: .3, hiHue: 330, hiSat: .2, bloom: .3, soft: .6, vigBlur: .3, vignette: .3,
+    aberr: .7, grain: .6, grainSize: 1.6 } },
+
+  { id: 'handycam', name: 'Handycam DV', params: {
+    exposure: .1, contrast: .15, highlights: .15, fade: .1, temp: -.1, sat: .1,
+    shHue: 200, shSat: .2, hiHue: 55, hiSat: .15, bloom: .45, soft: .2, vignette: .25,
+    aberr: .35, grain: .35, grainSize: 1.1 } },
+
+  { id: 'blockbuster', name: 'Teal & Orange ciné', params: {
+    contrast: .25, highlights: -.1, shadows: .1, fade: .08, temp: .1, sat: .1,
+    shHue: 190, shSat: .7, hiHue: 30, hiSat: .6, bloom: .25, halation: .3, vignette: .35,
+    grain: .35, grainSize: 1.1 } },
+
+  { id: 'noir-ciné', name: 'Noir ciné 35 mm', params: {
+    exposure: -.1, contrast: .45, highlights: -.15, shadows: -.1, fade: .1, sat: -.85,
+    shHue: 215, shSat: .25, hiHue: 45, hiSat: .15, bloom: .35, halation: .3, vignette: .6,
+    grain: .65, grainSize: 1.4, dust: .3, hair: .15, scratch: .25 } },
 ];
