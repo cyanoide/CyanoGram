@@ -93,10 +93,10 @@ function params(){
 // ---------- rendu ----------
 // vitesse de renouvellement des particules en vidéo : 0 = fixes, 1 = très rapide (timelapse)
 const rateOf = x => 8 * x * x, partRate = () => rateOf(state.partSpeed);
-function seedsNow(){
+function seedsNow(tt){
   const v = state.video;
   if (state.kind === 'video' && v){
-    const t = v.currentTime || 0;
+    const t = tt ?? (v.currentTime || 0);
     return { seed: state.seed + Math.floor(t * partRate()) * 3.17, seedG: state.seed + Math.floor(t * 24) * 1.91 };
   }
   return { seed: state.seed, seedG: state.seed };
@@ -757,6 +757,50 @@ async function seekExact(v, t, tol){
     }
   }
 }
+// Lecture "exacte" d'une vidéo : on sépare les images compressées du fichier (mp4box) et on les décode une par une
+// avec WebCodecs, avec leur vraie date. Pas de seek, pas d'image en double ni sautée, même en 24/25/60 fps ou en cadence variable.
+function demuxVideo(file){
+  return new Promise(async (resolve, reject) => {
+    if (!window.MP4Box || !window.VideoDecoder) return reject(new Error('indisponible'));
+    const mp = MP4Box.createFile(), samples = [];
+    let track = null, trak = null;
+    mp.onError = e => reject(new Error('demux ' + e));
+    mp.onReady = info => {
+      track = info.videoTracks[0];
+      if (!track) return reject(new Error('pas de piste vidéo'));
+      trak = mp.getTrackById(track.id);
+      mp.setExtractionOptions(track.id, null, { nbSamples: 1e6 });
+      mp.start();
+    };
+    mp.onSamples = (id, u, ss) => { for (const s of ss) samples.push(s); };
+    try {
+      const buf = await file.arrayBuffer(); buf.fileStart = 0;
+      mp.appendBuffer(buf); mp.flush();
+    } catch (e){ return reject(e); }
+    if (!track || !samples.length) return reject(new Error('aucune image'));
+    const entry = trak.mdia.minf.stbl.stsd.entries[0];
+    const box = entry.avcC || entry.hvcC;
+    if (!box) return reject(new Error('codec sans description'));
+    const ds = new DataStream(undefined, 0, DataStream.BIG_ENDIAN); box.write(ds);
+    const cfg = { codec: track.codec, codedWidth: track.video.width, codedHeight: track.video.height, description: new Uint8Array(ds.buffer, 8) };
+    const m = track.matrix || [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const rot = ((Math.round(Math.atan2(m[1], m[0]) * 180 / Math.PI) % 360) + 360) % 360;
+    resolve({ samples, cfg, rot });
+  });
+}
+
+// image décodée -> canvas de rendu (en appliquant la rotation d'origine, ex. vidéo iPhone en portrait)
+function frameFromDecoded(vf, rot){
+  const W = view.width, H = view.height;
+  if (vcan.width !== W || vcan.height !== H){ vcan.width = W; vcan.height = H; }
+  vctx.save();
+  vctx.translate(W / 2, H / 2); vctx.rotate(rot * Math.PI / 180);
+  const sw = rot % 180 ? H : W, sh = rot % 180 ? W : H;
+  vctx.drawImage(vf, -sw / 2, -sh / 2, sw, sh);
+  vctx.restore();
+  return vcan;
+}
+
 const canOffline = () => !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer && state.vfile);
 const EXPORT_FPS = 30;
 
@@ -803,6 +847,43 @@ async function encodeOffline(v, btn){
     aenc.configure(acfg);
   }
 
+  let dm = null;
+  try {
+    dm = await demuxVideo(state.vfile);
+    if (!(await VideoDecoder.isConfigSupported(dm.cfg)).supported) dm = null;
+  } catch (e){ console.warn('Décodage exact indisponible, lecture par positions', e); dm = null; }
+
+  if (dm){
+    const pending = [];
+    let derr = null, flushed = false, si = 0, n = 0;
+    const dec = new VideoDecoder({ output: f => pending.push(f), error: e => { derr = e; } });
+    dec.configure(dm.cfg);
+    const t0 = Math.min(...dm.samples.map(s => s.cts)), ts = dm.samples[0].timescale;
+    const dur = v.duration;
+    while (!(flushed && !pending.length)){
+      if (state.cancelExport) break;
+      if (derr) throw derr;
+      if (err) throw err;
+      if (pending.length){
+        const f = pending.shift();
+        const t = Math.max(0, f.timestamp - Math.round(t0 / ts * 1e6)), d = f.duration || Math.round(1e6 / fps);
+        R.updateFrame(frameFromDecoded(f, dm.rot)); f.close();
+        R.render(params(), { ...seedsNow(t / 1e6) });
+        const out = new VideoFrame(view, { timestamp: t, duration: d });
+        venc.encode(out, { keyFrame: n % 60 === 0 }); out.close(); n++;
+        while (venc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 5));
+        if (n % 3 === 0){ btn.textContent = `Annuler (${Math.min(99, Math.round(t / 1e6 / dur * 100))}%)`; await new Promise(r => setTimeout(r)); }
+      } else if (si < dm.samples.length && pending.length < 3 && dec.decodeQueueSize < 6){
+        const s = dm.samples[si++];
+        dec.decode(new EncodedVideoChunk({ type: s.is_sync ? 'key' : 'delta', timestamp: Math.round(s.cts / s.timescale * 1e6), duration: Math.round(s.duration / s.timescale * 1e6), data: s.data }));
+        s.data = null;
+        if (si === dm.samples.length) dec.flush().then(() => { flushed = true; }, e => { derr = e; });
+      } else {
+        await new Promise(r => setTimeout(r, 2));
+      }
+    }
+    try { dec.close(); } catch {}
+  } else {
   for (let i = 0; i < total; i++){
     if (state.cancelExport) break;
     if (err) throw err;
@@ -814,6 +895,7 @@ async function encodeOffline(v, btn){
     f.close();
     while (venc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 5));
     if (i % 3 === 0){ btn.textContent = `Annuler (${Math.round(i / total * 100)}%)`; await new Promise(r => setTimeout(r)); }
+  }
   }
   if (state.cancelExport){ try { venc.close(); aenc?.close(); } catch {} return null; }
 
