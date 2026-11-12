@@ -12,7 +12,7 @@ let R, T; // renderer principal + renderer de vignettes
 const state = {
   presetId: 'original', intensity: 1, delta: {}, seed: Math.random() * 100,
   w: 0, h: 0, srcW: 0, srcH: 0, bypass: false, loaded: false, name: 'photo', meta: null, exportUrl: null,
-  kind: 'photo', video: null, exporting: false, cancelExport: false,
+  kind: 'photo', video: null, partSpeed: (() => { try { const v = parseFloat(localStorage.getItem('cg_pspeed')); return v >= 0 && v <= 1 ? v : 0.15; } catch { return 0.15; } })(), exporting: false, cancelExport: false,
 };
 
 // ---------- filtres perso (localStorage) ----------
@@ -91,11 +91,13 @@ function params(){
 }
 
 // ---------- rendu ----------
+// vitesse de renouvellement des particules en vidéo : 0 = fixes, 1 = très rapide (timelapse)
+const rateOf = x => 8 * x * x, partRate = () => rateOf(state.partSpeed);
 function seedsNow(){
   const v = state.video;
   if (state.kind === 'video' && v){
     const t = v.currentTime || 0;
-    return { seed: state.seed + Math.floor(t * 1.5) * 3.17, seedG: state.seed + Math.floor(t * 24) * 1.91 };
+    return { seed: state.seed + Math.floor(t * partRate()) * 3.17, seedG: state.seed + Math.floor(t * 24) * 1.91 };
   }
   return { seed: state.seed, seedG: state.seed };
 }
@@ -343,6 +345,11 @@ function buildUI(){
     pills.append(b);
   }
   pp.prepend(pills);
+  const spd = makeSlider({ key: '_pspd', label: 'Particules en vidéo : fixes ← → changeantes', min: 0, max: 1, step: 0.01, def: state.partSpeed },
+    v => { state.partSpeed = v; try { localStorage.setItem('cg_pspeed', v); } catch {} },
+    v => { const r = rateOf(v); return v === 0 ? 'fixes' : r < 1 ? '1 / ' + (1 / r).toFixed(1) + ' s' : r.toFixed(1) + ' / s'; });
+  spd._set(state.partSpeed);
+  pp.append(spd);
   const gen = document.createElement('div'); gen.className = 'row';
   gen.innerHTML = `<button class="btn primary" id="btnSeed">🎲 Générer un autre tirage</button>`;
   pp.append(gen);
