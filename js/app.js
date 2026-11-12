@@ -176,21 +176,47 @@ function fmtTime(t){ t = Math.max(0, Math.round(t || 0)); return Math.floor(t / 
 
 function stopVideo(){
   const v = state.video;
-  if (v){ v.pause(); try { URL.revokeObjectURL(v.src); } catch {} }
+  if (v){ v.pause(); try { URL.revokeObjectURL(v.src); } catch {} v.remove(); }
   state.video = null; state.kind = 'photo';
   $('#vbar').hidden = true; $('#stage').classList.remove('video');
   const b = $('#btnExport'); if (b) b.textContent = 'Exporter';
 }
 
+// Safari iOS ne précharge pas une <video> détachée : 'loadeddata' n'arrive jamais tant qu'elle n'est pas
+// dans la page et lancée. On l'attache donc (quasi invisible), on la lance en muet, et on attend la 1re image.
+function waitFirstFrame(v){
+  return new Promise((res, rej) => {
+    let done = false;
+    const ok = () => { if (!done && v.videoWidth > 0){ done = true; cleanup(); res(); } };
+    const ko = () => { if (!done){ done = true; cleanup(); rej(new Error(v.error ? 'code ' + v.error.code : 'timeout')); } };
+    const evs = ['loadeddata', 'canplay', 'playing', 'timeupdate'];
+    const cleanup = () => { evs.forEach(e => v.removeEventListener(e, ok)); v.removeEventListener('error', ko); clearTimeout(t); };
+    evs.forEach(e => v.addEventListener(e, ok));
+    v.addEventListener('error', ko);
+    const t = setTimeout(() => (v.videoWidth > 0 ? ok() : ko()), 12000);
+    if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(() => ok());
+    v.load();
+    const p = v.play(); if (p && p.catch) p.catch(() => {});
+    ok();
+  });
+}
+
 async function loadVideo(file){
   stopVideo();
   state.name = file.name.replace(/\.[^.]+$/, ''); state.meta = null;
+  toast('Chargement de la vidéo…');
   const v = document.createElement('video');
-  v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+  v.muted = true; v.defaultMuted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
+  v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', '');
+  v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:.02;pointer-events:none;z-index:-1';
+  document.body.appendChild(v);
   v.src = URL.createObjectURL(file);
-  try {
-    await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('video')); });
-  } catch { toast('Vidéo illisible (format non pris en charge)'); URL.revokeObjectURL(v.src); return; }
+  try { await waitFirstFrame(v); }
+  catch (e){
+    URL.revokeObjectURL(v.src); v.remove();
+    toast('Vidéo illisible' + (e.message === 'timeout' ? ' (trop longue à charger)' : ' (format non pris en charge)'));
+    return;
+  }
   const vw = v.videoWidth, vh = v.videoHeight;
   const sc = Math.min(1, VIDEO_MAX / Math.max(vw, vh));
   const w = Math.max(2, Math.round(vw * sc / 2) * 2), h = Math.max(2, Math.round(vh * sc / 2) * 2);   // dimensions paires (H.264)
@@ -216,9 +242,9 @@ async function loadVideo(file){
 }
 
 function startPreviewLoop(){
-  const v = state.video;
+  const v = state.video, id = state.loopId = (state.loopId || 0) + 1;
   const tick = () => {
-    if (state.video !== v || state.exporting) return;
+    if (state.video !== v || state.exporting || state.loopId !== id) return;
     R.updateFrame(v);
     R.render(params(), { bypass: state.bypass, ...seedsNow() });
     syncVideoBar();
@@ -599,7 +625,7 @@ async function exportVideo(){
   const btn = $('#btnExport'), v = state.video;
   if (state.exporting){ state.cancelExport = true; return; }
   const mime = pickMime();
-  if (!mime || !view.captureStream){ toast('Export vidéo non pris en charge par ce navigateur'); return; }
+  if (!mime || !view.captureStream){ toast('Export vidéo non pris en charge par ce navigateur (iPhone : iOS 18.4 ou plus récent requis)'); return; }
   state.exporting = true; state.cancelExport = false;
   const pw = view.width, ph = view.height;
   let wake = null, rec = null;
