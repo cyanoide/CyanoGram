@@ -222,7 +222,7 @@ async function loadVideo(file){
   v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', '');
   v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:.02;pointer-events:none;z-index:-1';
   document.body.appendChild(v);
-  v.src = URL.createObjectURL(file);
+  v.src = URL.createObjectURL(file); state.vfile = file;
   try { await waitFirstFrame(v); }
   catch (e){
     URL.revokeObjectURL(v.src); v.remove();
@@ -266,14 +266,16 @@ function startPreviewLoop(){
 }
 function syncVideoBar(){
   const v = state.video; if (!v) return;
-  $('#vPlay').textContent = v.paused ? '▶' : '⏸';
+  $('#vPlay').classList.toggle('paused', v.paused);
   if (!$('#vSeek').matches(':active') && v.duration) $('#vSeek').value = Math.round(v.currentTime / v.duration * 1000);
-  $('#vTime').textContent = fmtTime(v.currentTime);
+  $('#vSeek').style.setProperty('--p', ($('#vSeek').value / 10) + '%');
+  $('#vTime').textContent = fmtTime(v.currentTime) + ' / ' + fmtTime(v.duration);
 }
 function initVideoBar(){
   $('#vPlay').onclick = () => { const v = state.video; if (!v) return; if (v.paused) v.play(); else v.pause(); syncVideoBar(); };
   $('#vSeek').oninput = e => {
     const v = state.video; if (!v || !v.duration) return;
+    e.target.style.setProperty('--p', (e.target.value / 10) + '%');
     v.currentTime = e.target.value / 1000 * v.duration;
     if (v.paused) v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => { R.updateFrame(frame(v)); draw(); syncVideoBar(); }) : setTimeout(() => { R.updateFrame(frame(v)); draw(); }, 80);
   };
@@ -642,7 +644,7 @@ async function exportVideo(){
   const btn = $('#btnExport'), v = state.video;
   if (state.exporting){ state.cancelExport = true; return; }
   const mime = pickMime();
-  if (!mime || !view.captureStream){ toast('Export vidéo non pris en charge par ce navigateur (iPhone : iOS 18.4 ou plus récent requis)'); return; }
+  if (!canOffline() && (!mime || !view.captureStream)){ toast('Export vidéo non pris en charge par ce navigateur (iPhone : iOS 18.4 ou plus récent requis)'); return; }
   state.exporting = true; state.cancelExport = false;
   const pw = view.width, ph = view.height;
   let wake = null, rec = null;
@@ -655,7 +657,17 @@ async function exportVideo(){
     v.pause(); v.loop = false; await seekTo(v, 0);
     R.resize(state.w, state.h);
 
-    // son : la piste audio de la vidéo est routée vers l'enregistreur (et pas vers les haut-parleurs)
+    // 1) export image par image (pas temps réel) : fluide quelle que soit la puissance du téléphone
+    if (canOffline()){
+      let res = null;
+      try { res = await encodeOffline(v, btn); }
+      catch (e){ console.warn('Export image par image impossible', e); if (!mime){ throw e; } toast('Mode précis indisponible, export en temps réel…'); await seekTo(v, 0); }
+      if (state.cancelExport){ toast('Export annulé'); return; }
+      if (res){ deliver(res.blob, 'mp4', res.audio ? 'Son conservé.' : 'Sans son (non pris en charge par ce navigateur).'); return; }
+    }
+    if (!mime){ throw new Error('format non pris en charge'); }
+
+    // 2) secours : enregistrement en temps réel. Son : la piste audio de la vidéo est routée vers l'enregistreur (et pas vers les haut-parleurs)
     let audioTracks = [];
     try {
       state.actx ||= new (window.AudioContext || window.webkitAudioContext)();
@@ -697,14 +709,7 @@ async function exportVideo(){
     const blob = new Blob(chunks, { type });
     if (!blob.size){ toast('Export vidéo vide : réessaie'); return; }
     const ext = type.includes('mp4') ? 'mp4' : 'webm';
-    const name = `CyanoGram_${slug(state.name)}_${slug(currentPreset().name)}.${ext}`;
-    const info = {
-      blob, name, kind: 'video',
-      text: `${state.w} × ${state.h} px · ${fmtTime(v.duration)} · ${(blob.size / 1048576).toFixed(1)} Mo`,
-      meta: 'Son conservé. Le navigateur ne permet pas de recopier la localisation de la vidéo d’origine.' + (ext === 'webm' ? ' Format WebM : à convertir pour l’app Photos.' : ''),
-    };
-    if (matchMedia('(pointer:coarse)').matches) showExportDialog(info);
-    else { download(blob, name); toast(`Exporté · ${info.text}`); }
+    deliver(blob, ext, 'Son conservé.' + (ext === 'webm' ? ' Format WebM : à convertir pour l’app Photos.' : ''));
   } catch (e){
     console.warn(e); toast('Export vidéo impossible : ' + (e.message || e));
     try { if (rec && rec.state !== 'inactive') rec.stop(); } catch {}
@@ -716,6 +721,98 @@ async function exportVideo(){
     btn.textContent = label; btn.disabled = false; $('#btnCompare').disabled = false;
     startPreviewLoop(); v.play().catch(() => {});
   }
+}
+
+function deliver(blob, ext, note){
+  const v = state.video;
+  const name = `CyanoGram_${slug(state.name)}_${slug(currentPreset().name)}.${ext}`;
+  const info = {
+    blob, name, kind: 'video',
+    text: `${state.w} × ${state.h} px · ${fmtTime(v.duration)} · ${(blob.size / 1048576).toFixed(1)} Mo`,
+    meta: note + ' Le navigateur ne permet pas de recopier la localisation de la vidéo d’origine.',
+  };
+  if (matchMedia('(pointer:coarse)').matches) showExportDialog(info);
+  else { download(blob, name); toast(`Exporté · ${info.text}`); }
+}
+
+const canOffline = () => !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer && state.vfile);
+const EXPORT_FPS = 30;
+
+// Export image par image : on avance dans la vidéo, on filtre l'image, on l'encode en H.264 puis on assemble un MP4.
+// Pas de temps réel => aucune image perdue, même si le téléphone met 1 s à calculer une image.
+async function encodeOffline(v, btn){
+  const w = state.w, h = state.h, fps = EXPORT_FPS;
+  const total = Math.max(1, Math.floor(v.duration * fps));
+  const bitrate = Math.round(Math.min(20e6, Math.max(5e6, w * h * fps * 0.14)));
+  let vcfg = null;
+  for (const codec of ['avc1.640033', 'avc1.64002A', 'avc1.4D0028', 'avc1.42E01F']){
+    const c = { codec, width: w, height: h, bitrate, framerate: fps };
+    try { if ((await VideoEncoder.isConfigSupported(c)).supported){ vcfg = c; break; } } catch {}
+  }
+  if (!vcfg) throw new Error('encodeur H.264 indisponible');
+
+  // son : on décode la piste audio du fichier d'origine puis on la ré-encode en AAC
+  let pcm = null, acfg = null;
+  if (window.AudioEncoder && window.AudioData && state.vfile.size < 400 * 1048576){
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = await ac.decodeAudioData(await state.vfile.arrayBuffer());
+      ac.close?.();
+      const ch = Math.min(2, buf.numberOfChannels);
+      const c = { codec: 'mp4a.40.2', sampleRate: buf.sampleRate, numberOfChannels: ch, bitrate: 128000 };
+      if (buf.length && (await AudioEncoder.isConfigSupported(c)).supported){
+        acfg = c; pcm = Array.from({ length: ch }, (_, i) => buf.getChannelData(i));
+      }
+    } catch (e){ console.warn('Audio ignoré', e); }
+  }
+
+  const target = new Mp4Muxer.ArrayBufferTarget();
+  const muxer = new Mp4Muxer.Muxer({
+    target, fastStart: 'in-memory',
+    video: { codec: 'avc', width: w, height: h },
+    ...(acfg ? { audio: { codec: 'aac', numberOfChannels: acfg.numberOfChannels, sampleRate: acfg.sampleRate } } : {}),
+  });
+  let err = null;
+  const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => { err = e; } });
+  venc.configure(vcfg);
+  let aenc = null;
+  if (acfg){
+    aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => { err = e; } });
+    aenc.configure(acfg);
+  }
+
+  for (let i = 0; i < total; i++){
+    if (state.cancelExport) break;
+    if (err) throw err;
+    await seekTo(v, Math.min(i / fps, v.duration - 0.001));
+    R.updateFrame(frame(v));
+    R.render(params(), { ...seedsNow() });
+    const f = new VideoFrame(view, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
+    venc.encode(f, { keyFrame: i % 60 === 0 });
+    f.close();
+    while (venc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 5));
+    if (i % 3 === 0){ btn.textContent = `Annuler (${Math.round(i / total * 100)}%)`; await new Promise(r => setTimeout(r)); }
+  }
+  if (state.cancelExport){ try { venc.close(); aenc?.close(); } catch {} return null; }
+
+  if (aenc){
+    const sr = acfg.sampleRate, n = Math.min(pcm[0].length, Math.floor(total / fps * sr)), CH = 4096;
+    for (let o = 0; o < n; o += CH){
+      const len = Math.min(CH, n - o), data = new Float32Array(len * pcm.length);
+      pcm.forEach((c, k) => data.set(c.subarray(o, o + len), k * len));
+      const ad = new AudioData({ format: 'f32-planar', sampleRate: sr, numberOfFrames: len, numberOfChannels: pcm.length,
+        timestamp: Math.round(o / sr * 1e6), data });
+      aenc.encode(ad); ad.close();
+      if (aenc.encodeQueueSize > 20) await new Promise(r => setTimeout(r, 5));
+    }
+    await aenc.flush(); aenc.close();
+  }
+  await venc.flush(); venc.close();
+  if (err) throw err;
+  muxer.finalize();
+  const blob = new Blob([target.buffer], { type: 'video/mp4' });
+  if (!blob.size) throw new Error('fichier vide');
+  return { blob, audio: !!acfg };
 }
 
 function showExportDialog(info){
