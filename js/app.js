@@ -176,6 +176,16 @@ async function loadURL(url){
 const VIDEO_MAX = 1920;                      // plus grand côté en sortie
 function fmtTime(t){ t = Math.max(0, Math.round(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
 
+// Chaque image vidéo est d'abord réduite par le GPU (canvas 2D) à la taille du rendu, puis envoyée à WebGL :
+// envoyer directement une vidéo 4K à chaque image est ce qui fait saccader Safari.
+const vcan = document.createElement('canvas'), vctx = vcan.getContext('2d', { alpha: false });
+function frame(v){
+  const w = view.width, h = view.height;
+  if (vcan.width !== w || vcan.height !== h){ vcan.width = w; vcan.height = h; }
+  vctx.drawImage(v, 0, 0, w, h);
+  return vcan;
+}
+
 function stopVideo(){
   const v = state.video;
   if (v){ v.pause(); try { URL.revokeObjectURL(v.src); } catch {} v.remove(); }
@@ -222,7 +232,6 @@ async function loadVideo(file){
   const vw = v.videoWidth, vh = v.videoHeight;
   const sc = Math.min(1, VIDEO_MAX / Math.max(vw, vh));
   const w = Math.max(2, Math.round(vw * sc / 2) * 2), h = Math.max(2, Math.round(vh * sc / 2) * 2);   // dimensions paires (H.264)
-  R.setImage(v, vw, vh);
   // vignettes : première image, recadrée en carré
   const t = document.createElement('canvas'); t.width = t.height = 192;
   const m = Math.min(vw, vh);
@@ -231,8 +240,9 @@ async function loadVideo(file){
 
   state.video = v; state.kind = 'video';
   state.srcW = vw; state.srcH = vh; state.w = w; state.h = h; state.loaded = true;
-  const ps = Math.min(1, 1280 / Math.max(w, h));
+  const ps = Math.min(1, (IS_APPLE ? 960 : 1280) / Math.max(w, h));
   R.resize(Math.round(w * ps), Math.round(h * ps));
+  R.setImage(frame(v), w, h);
   $('#empty').hidden = true; $('#hint').hidden = false;
   $('#vbar').hidden = false; $('#stage').classList.add('video');
   $('#btnCompare').disabled = $('#btnExport').disabled = false;
@@ -247,7 +257,7 @@ function startPreviewLoop(){
   const v = state.video, id = state.loopId = (state.loopId || 0) + 1;
   const tick = () => {
     if (state.video !== v || state.exporting || state.loopId !== id) return;
-    R.updateFrame(v);
+    R.updateFrame(frame(v));
     R.render(params(), { bypass: state.bypass, ...seedsNow() });
     syncVideoBar();
     if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(tick); else requestAnimationFrame(tick);
@@ -265,7 +275,7 @@ function initVideoBar(){
   $('#vSeek').oninput = e => {
     const v = state.video; if (!v || !v.duration) return;
     v.currentTime = e.target.value / 1000 * v.duration;
-    if (v.paused) v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => { R.updateFrame(v); draw(); syncVideoBar(); }) : setTimeout(() => { R.updateFrame(v); draw(); }, 80);
+    if (v.paused) v.requestVideoFrameCallback ? v.requestVideoFrameCallback(() => { R.updateFrame(frame(v)); draw(); syncVideoBar(); }) : setTimeout(() => { R.updateFrame(frame(v)); draw(); }, 80);
   };
   document.addEventListener('visibilitychange', () => {
     // iOS suspend la page en arrière-plan : on remet la lecture proprement au retour
@@ -671,7 +681,7 @@ async function exportVideo(){
       v.addEventListener('ended', finish, { once: true });
       const tick = () => {
         if (!state.exporting || state.cancelExport || v.ended){ finish(); return; }
-        R.updateFrame(v);
+        R.updateFrame(frame(v));
         R.render(params(), { ...seedsNow() });
         btn.textContent = `Annuler (${Math.round(v.currentTime / v.duration * 100)}%)`;
         if ('requestVideoFrameCallback' in v) v.requestVideoFrameCallback(tick); else requestAnimationFrame(tick);
@@ -679,7 +689,7 @@ async function exportVideo(){
       v.play().then(tick).catch(finish);
     });
     v.pause();
-    if (!state.cancelExport){ R.updateFrame(v); R.render(params(), { ...seedsNow() }); await new Promise(r => setTimeout(r, 300)); }
+    if (!state.cancelExport){ R.updateFrame(frame(v)); R.render(params(), { ...seedsNow() }); await new Promise(r => setTimeout(r, 300)); }
     rec.stop(); await stopped;
 
     if (state.cancelExport){ toast('Export annulé'); return; }
