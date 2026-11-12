@@ -12,7 +12,7 @@ let R, T; // renderer principal + renderer de vignettes
 const state = {
   presetId: 'original', intensity: 1, delta: {}, seed: Math.random() * 100,
   w: 0, h: 0, srcW: 0, srcH: 0, bypass: false, loaded: false, name: 'photo', meta: null, exportUrl: null,
-  kind: 'photo', video: null, partSpeed: (() => { try { const v = parseFloat(localStorage.getItem('cg_pspeed')); return v >= 0 && v <= 1 ? v : 0.15; } catch { return 0.15; } })(), exporting: false, cancelExport: false,
+  kind: 'photo', video: null, rvfcMiss: 0, partSpeed: (() => { try { const v = parseFloat(localStorage.getItem('cg_pspeed')); return v >= 0 && v <= 1 ? v : 0.15; } catch { return 0.15; } })(), exporting: false, cancelExport: false,
 };
 
 // ---------- filtres perso (localStorage) ----------
@@ -735,6 +735,28 @@ function deliver(blob, ext, note){
   else { download(blob, name); toast(`Exporté · ${info.text}`); }
 }
 
+// Positionne la vidéo sur une image précise et attend qu'elle soit VRAIMENT affichée
+// (sur iPhone, 'seeked' arrive parfois avant que la nouvelle image soit prête : on obtiendrait des images en double = saccades).
+let rvfcWorks = true;
+async function seekExact(v, t, tol){
+  for (let attempt = 0; attempt < 4; attempt++){
+    const tt = Math.min(Math.max(0, t + attempt * 0.002), v.duration - 0.001);
+    let media = null;
+    const shown = rvfcWorks && v.requestVideoFrameCallback
+      ? new Promise(res => v.requestVideoFrameCallback((_, m) => { media = m.mediaTime; res(true); }))
+      : null;
+    await new Promise(res => { if (Math.abs(v.currentTime - tt) < 1e-4) return res(); v.addEventListener('seeked', res, { once: true }); v.currentTime = tt; });
+    if (shown){
+      const ok = await Promise.race([shown, new Promise(r => setTimeout(() => r(false), 250))]);
+      if (!ok){ if (attempt === 0 && ++state.rvfcMiss >= 3) rvfcWorks = false; return; }
+      state.rvfcMiss = 0;
+      if (Math.abs(media - t) <= tol) return;      // bonne image
+    } else {
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return;
+    }
+  }
+}
 const canOffline = () => !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer && state.vfile);
 const EXPORT_FPS = 30;
 
@@ -784,7 +806,7 @@ async function encodeOffline(v, btn){
   for (let i = 0; i < total; i++){
     if (state.cancelExport) break;
     if (err) throw err;
-    await seekTo(v, Math.min(i / fps, v.duration - 0.001));
+    await seekExact(v, Math.min(i / fps, v.duration - 0.001), 0.5 / fps);
     R.updateFrame(frame(v));
     R.render(params(), { ...seedsNow() });
     const f = new VideoFrame(view, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
